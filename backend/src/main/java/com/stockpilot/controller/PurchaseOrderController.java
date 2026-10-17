@@ -26,6 +26,7 @@ public class PurchaseOrderController {
     private final PurchaseOrderService purchaseOrderService;
 
     @PostMapping
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
     public ResponseEntity<ApiResponse<PurchaseOrderResponse>> createPurchaseOrder(@Valid @RequestBody PurchaseOrderCreateRequest request) {
         PurchaseOrderResponse response = purchaseOrderService.createPurchaseOrder(request, null);
         return new ResponseEntity<>(ApiResponse.success(response, "Purchase Order created successfully"), HttpStatus.CREATED);

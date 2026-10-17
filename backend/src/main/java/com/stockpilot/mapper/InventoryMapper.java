@@ -11,13 +11,12 @@ public class InventoryMapper {
         if (inventory == null) return null;
 
         int available = inventory.getAvailableQuantity() != null ? inventory.getAvailableQuantity() : 0;
-        int reorderLvl = (inventory.getProduct() != null && inventory.getProduct().getReorderLevel() != null)
-                ? inventory.getProduct().getReorderLevel() : 10;
+        Integer reorderLvl = (inventory.getProduct() != null) ? inventory.getProduct().getReorderLevel() : null;
 
         String stockStatus = "HEALTHY";
         if (available == 0) {
             stockStatus = "OUT_OF_STOCK";
-        } else if (available <= reorderLvl) {
+        } else if (reorderLvl != null && available <= reorderLvl) {
             stockStatus = "LOW_STOCK";
         }
 

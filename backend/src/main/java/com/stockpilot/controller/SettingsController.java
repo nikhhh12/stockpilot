@@ -42,6 +42,7 @@ public class SettingsController {
     private String aiModel;
 
     @GetMapping("/config")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
     @Operation(summary = "Get Authoritative Analytics & System Configuration", description = "Returns active runtime thresholds and health indicators")
     public ResponseEntity<ApiResponse<SystemConfigResponse>> getSystemConfig() {
         SystemConfigResponse config = SystemConfigResponse.builder()

@@ -3,6 +3,8 @@ package com.stockpilot.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -34,7 +36,8 @@ public class Reservation {
     private Integer quantity;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 50)
     private ReservationStatusEnum status;
 
     @ManyToOne(fetch = FetchType.LAZY)

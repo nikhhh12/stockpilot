@@ -4,13 +4,14 @@ services:
   mysql:
     image: mysql:8.0
     container_name: stockpilot-mysql
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: stockpilot
-      MYSQL_USER: stockuser
-      MYSQL_PASSWORD: stockpassword
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stockpilot}
+      MYSQL_USER: ${MYSQL_USER:-stockuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stockpassword}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -18,24 +19,65 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
+    networks:
+      - stockpilot-network
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: stockpilot-backend
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      DB_URL: jdbc:mysql://mysql:3306/stockpilot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      DB_USERNAME: stockuser
-      DB_PASSWORD: stockpassword
-      JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-      AI_API_KEY: ${AI_API_KEY:-mock-key}
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-stockpilot}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: ${MYSQL_USER:-stockuser}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-stockpassword}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your .env file}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:80,http://localhost}
+      SHOW_SQL: ${SHOW_SQL:-false}
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_API_KEY: ${AI_API_KEY:-}
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - stockpilot-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: stockpilot-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - stockpilot-network
 
 volumes:
   mysql_data:
+    driver: local
+
+networks:
+  stockpilot-network:
+    driver: bridge

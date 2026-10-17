@@ -239,4 +239,35 @@ public class StatisticalIntelligenceTest {
         assertEquals("STATISTICAL_ANOMALY", anomalyReport.getStatus());
         assertTrue(anomalyReport.getAbsoluteZScore() >= 2.0);
     }
+
+    @Test
+    @DisplayName("Mathematical algorithms handle null items, zero horizon, and exact hand-calculated figures")
+    void testForecastingAlgorithmEdgeCasesWithNullsAndZeroDays() {
+        MovingAverageForecastAlgorithm ma = new MovingAverageForecastAlgorithm();
+        ExponentialSmoothingForecastAlgorithm es = new ExponentialSmoothingForecastAlgorithm();
+
+        // Empty / Zero Horizon guards
+        assertEquals(0.0, ma.calculateForecast(null, 14));
+        assertEquals(0.0, ma.calculateForecast(java.util.Collections.emptyList(), 14));
+        assertEquals(0.0, ma.calculateForecast(java.util.List.of(10.0, 20.0), 0));
+        assertEquals(0.0, ma.calculateForecast(java.util.List.of(10.0, 20.0), -5));
+
+        assertEquals(0.0, es.calculateForecast(null, 14));
+        assertEquals(0.0, es.calculateForecast(java.util.Collections.emptyList(), 14));
+        assertEquals(0.0, es.calculateForecast(java.util.List.of(10.0, 20.0), 0));
+
+        // Null elements in demand list
+        java.util.List<Double> withNulls = java.util.Arrays.asList(10.0, null, 20.0);
+        Double maNullResult = ma.calculateForecast(withNulls, 3);
+        assertNotNull(maNullResult);
+        assertEquals(30.0, maNullResult); // sum=30, size=3, avg=10, 3 days = 30.0
+
+        Double esNullResult = es.calculateForecast(withNulls, 1);
+        assertNotNull(esNullResult);
+        assertTrue(esNullResult > 0);
+
+        // Hand calculation verification for Moving Average: [10.0, 20.0, 30.0], 7 days -> mean = 20, 20*7 = 140.0
+        java.util.List<Double> handValues = java.util.List.of(10.0, 20.0, 30.0);
+        assertEquals(140.0, ma.calculateForecast(handValues, 7));
+    }
 }

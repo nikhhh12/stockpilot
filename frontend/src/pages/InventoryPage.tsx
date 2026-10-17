@@ -134,11 +134,13 @@ export const InventoryPage: React.FC = () => {
     setErrorMessage(null);
     if (inv) {
       setSelectedInventory(inv);
+      const prodId = inv.productId ?? inv.product?.id ?? products?.[0]?.id ?? 1;
+      const whId = inv.warehouseId ?? inv.warehouse?.id ?? warehouses?.[0]?.id ?? 1;
       setActionForm({
-        productId: inv.product.id,
-        warehouseId: inv.warehouse.id,
-        sourceWarehouseId: inv.warehouse.id,
-        destinationWarehouseId: warehouses?.find((w) => w.id !== inv.warehouse.id)?.id || inv.warehouse.id,
+        productId: prodId,
+        warehouseId: whId,
+        sourceWarehouseId: whId,
+        destinationWarehouseId: warehouses?.find((w) => w.id !== whId)?.id || whId,
         quantity: 5,
         resultingQuantity: inv.availableQuantity,
         referenceNumber: `REF-${Date.now().toString().slice(-6)}`,
@@ -365,18 +367,31 @@ export const InventoryPage: React.FC = () => {
                 </tr>
               ) : (
                 inventoryData?.content.map((inv) => {
-                  const isOut = inv.availableQuantity === 0;
-                  const isLow = inv.availableQuantity > 0 && inv.availableQuantity <= inv.product.reorderLevel;
+                  const isOut = inv.availableQuantity === 0 || inv.stockStatus === 'OUT_OF_STOCK';
+                  const reorderLevel = inv.reorderLevel ?? inv.product?.reorderLevel;
+                  const hasReorderLevel = typeof reorderLevel === 'number' && !isNaN(reorderLevel);
+                  const isLow =
+                    inv.stockStatus === 'LOW_STOCK' ||
+                    (hasReorderLevel && inv.availableQuantity > 0 && inv.availableQuantity <= reorderLevel);
+
+                  const productName = inv.productName ?? inv.product?.name ?? 'Unassigned Product';
+                  const productSku = inv.productSku ?? inv.product?.sku ?? 'N/A';
+                  const warehouseName = inv.warehouseName ?? inv.warehouse?.name ?? 'Unassigned Warehouse';
+                  const warehouseCode = inv.warehouseCode ?? inv.warehouse?.code ?? 'N/A';
+                  const riskLevel =
+                    inv.stockoutRisk ??
+                    inv.calculatedStockoutRisk ??
+                    (isOut ? 'CRITICAL' : isLow ? 'HIGH' : 'LOW');
 
                   return (
                     <tr key={inv.id} className="hover:bg-slate-800/30 transition-colors">
                       <td className="p-4">
-                        <div className="font-semibold text-white">{inv.product.name}</div>
-                        <div className="text-[11px] font-mono text-sky-400">{inv.product.sku}</div>
+                        <div className="font-semibold text-white">{productName}</div>
+                        <div className="text-[11px] font-mono text-sky-400">{productSku}</div>
                       </td>
                       <td className="p-4">
-                        <div className="text-slate-300 font-medium">{inv.warehouse.name}</div>
-                        <div className="text-slate-500 text-[10px] font-mono">{inv.warehouse.code}</div>
+                        <div className="text-slate-300 font-medium">{warehouseName}</div>
+                        <div className="text-slate-500 text-[10px] font-mono">{warehouseCode}</div>
                       </td>
                       <td className="p-4 text-center font-bold text-sky-400 text-sm">{inv.availableQuantity}</td>
                       <td className="p-4 text-center font-medium text-amber-400">{inv.reservedQuantity}</td>
@@ -387,14 +402,14 @@ export const InventoryPage: React.FC = () => {
                       <td className="p-4 text-center">
                         <Badge
                           variant={
-                            inv.calculatedStockoutRisk === 'CRITICAL' || isOut
+                            riskLevel === 'CRITICAL' || isOut
                               ? 'danger'
-                              : inv.calculatedStockoutRisk === 'HIGH' || isLow
+                              : riskLevel === 'HIGH' || isLow
                               ? 'warning'
                               : 'success'
                           }
                         >
-                          {inv.calculatedStockoutRisk || (isOut ? 'CRITICAL' : isLow ? 'HIGH' : 'LOW')}
+                          {riskLevel}
                         </Badge>
                       </td>
                       <td className="p-4 text-right">

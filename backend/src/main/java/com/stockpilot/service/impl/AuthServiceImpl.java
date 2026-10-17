@@ -28,9 +28,10 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
     private final UserMapper userMapper;
+    private final com.stockpilot.service.AuditLogService auditLogService;
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public AuthResponse login(LoginRequest request) {
         String email = request.getEmail().trim().toLowerCase();
         Authentication authentication = authenticationManager.authenticate(
@@ -40,6 +41,8 @@ public class AuthServiceImpl implements AuthService {
         String token = tokenProvider.generateToken(authentication);
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
+
+        auditLogService.logAction(user, "LOGIN", "User", user.getId(), "User logged in: " + user.getEmail());
 
         return AuthResponse.builder()
                 .token(token)
@@ -56,15 +59,25 @@ public class AuthServiceImpl implements AuthService {
             throw new DuplicateResourceException("User with email '" + email + "' already exists");
         }
 
+        com.stockpilot.entity.RoleEnum assignedRole = com.stockpilot.entity.RoleEnum.STAFF;
+        java.util.Optional<String> currentUserEmail = com.stockpilot.security.SecurityUtils.getCurrentUserEmail();
+        if (currentUserEmail.isPresent()) {
+            User currentCaller = userRepository.findByEmail(currentUserEmail.get()).orElse(null);
+            if (currentCaller != null && currentCaller.getRole() == com.stockpilot.entity.RoleEnum.ADMIN && request.getRole() != null) {
+                assignedRole = request.getRole();
+            }
+        }
+
         User user = User.builder()
                 .name(request.getName().trim())
                 .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .role(request.getRole())
+                .role(assignedRole)
                 .enabled(true)
                 .build();
 
         User saved = userRepository.save(user);
+        auditLogService.logAction(saved, "REGISTER", "User", saved.getId(), "User registered with role: " + saved.getRole());
         String token = tokenProvider.generateTokenFromUsername(saved.getEmail());
 
         return AuthResponse.builder()

@@ -16,18 +16,20 @@ public class ExponentialSmoothingForecastAlgorithm implements ForecastAlgorithm 
 
     @Override
     public Double calculateForecast(List<Double> historicalDailyDemands, int forecastDays) {
-        if (historicalDailyDemands == null || historicalDailyDemands.isEmpty()) {
+        if (historicalDailyDemands == null || historicalDailyDemands.isEmpty() || forecastDays <= 0) {
             return 0.0;
         }
 
         double alpha = DEFAULT_ALPHA;
-        double smoothed = historicalDailyDemands.get(0);
+        Double first = historicalDailyDemands.get(0);
+        double smoothed = first != null ? first : 0.0;
 
         for (int i = 1; i < historicalDailyDemands.size(); i++) {
             double current = historicalDailyDemands.get(i) != null ? historicalDailyDemands.get(i) : 0.0;
             smoothed = alpha * current + (1.0 - alpha) * smoothed;
         }
 
-        return Math.round(smoothed * forecastDays * 100.0) / 100.0;
+        double result = Math.max(0.0, smoothed * forecastDays);
+        return Math.round(result * 100.0) / 100.0;
     }
 }

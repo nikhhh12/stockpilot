@@ -14,16 +14,17 @@ public class MovingAverageForecastAlgorithm implements ForecastAlgorithm {
 
     @Override
     public Double calculateForecast(List<Double> historicalDailyDemands, int forecastDays) {
-        if (historicalDailyDemands == null || historicalDailyDemands.isEmpty()) {
+        if (historicalDailyDemands == null || historicalDailyDemands.isEmpty() || forecastDays <= 0) {
             return 0.0;
         }
 
         double sum = 0.0;
         for (Double demand : historicalDailyDemands) {
-            sum += (demand != null ? demand : 0.0);
+            sum += (demand != null ? Math.max(0.0, demand) : 0.0);
         }
 
         double avgDaily = sum / historicalDailyDemands.size();
-        return Math.round(avgDaily * forecastDays * 100.0) / 100.0;
+        double result = Math.max(0.0, avgDaily * forecastDays);
+        return Math.round(result * 100.0) / 100.0;
     }
 }

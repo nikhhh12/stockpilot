@@ -5,12 +5,12 @@ spring:
     active: dev
   jpa:
     open-in-view: false
-    show-sql: true
+    show-sql: ${SHOW_SQL:false}
     hibernate:
       ddl-auto: validate
     properties:
       hibernate:
-        format_sql: true
+        format_sql: ${SHOW_SQL:false}
         dialect: org.hibernate.dialect.MySQLDialect
   flyway:
     enabled: true
@@ -92,3 +92,7 @@ springdoc:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{correlationId}] %-5level %logger{36} - %msg%n"

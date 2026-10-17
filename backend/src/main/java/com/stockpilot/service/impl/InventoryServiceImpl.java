@@ -23,8 +23,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class InventoryServiceImpl implements InventoryService {
 
     private final InventoryRepository inventoryRepository;
@@ -34,6 +37,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final ReservationRepository reservationRepository;
     private final StockTransactionRepository stockTransactionRepository;
     private final InventoryMapper inventoryMapper;
+    private final com.stockpilot.service.AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -104,6 +108,9 @@ public class InventoryServiceImpl implements InventoryService {
 
         recordTransaction(product, warehouse, TransactionTypeEnum.ADJUSTMENT, delta,
                 prevAvail, newAvail, res, res, dam, dam, request.getReason(), request.getReferenceNumber(), request.getNotes(), user);
+
+        auditLogService.logAction(user, "INVENTORY_ADJUSTMENT", "Inventory", saved.getId(),
+                "Adjusted stock for SKU '" + product.getSku() + "' in warehouse '" + warehouse.getCode() + "'. New Available=" + saved.getAvailableQuantity());
 
         return inventoryMapper.toResponse(saved, calculateStockoutRisk(saved));
     }
@@ -266,6 +273,31 @@ public class InventoryServiceImpl implements InventoryService {
         Warehouse destination = getWarehouse(request.getDestinationWarehouseId());
         User user = getUser(userId);
 
+        // Idempotency: verify if this exact transfer operation was already executed
+        if (StringUtils.hasText(request.getReferenceNumber())) {
+            var existingTxOpt = stockTransactionRepository.findFirstByReferenceNumberAndTransactionType(
+                    request.getReferenceNumber(), TransactionTypeEnum.TRANSFER_OUT);
+            if (existingTxOpt.isPresent()) {
+                StockTransaction prevTx = existingTxOpt.get();
+                boolean sameProduct = prevTx.getProduct().getId().equals(product.getId());
+                boolean sameSource = prevTx.getWarehouse().getId().equals(source.getId());
+                boolean sameQty = prevTx.getQuantity().equals(request.getQuantity());
+
+                if (!sameProduct || !sameSource || !sameQty) {
+                    throw new InvalidOperationException("Idempotency conflict: Reference number '" +
+                            request.getReferenceNumber() + "' has already been used with different transfer parameters");
+                }
+
+                log.info("Duplicate transfer request with reference '{}' detected. Returning existing balances.", request.getReferenceNumber());
+                Inventory existingSrc = getOrCreateInventory(product, source);
+                Inventory existingDst = getOrCreateInventory(product, destination);
+                return Arrays.asList(
+                        inventoryMapper.toResponse(existingSrc, calculateStockoutRisk(existingSrc)),
+                        inventoryMapper.toResponse(existingDst, calculateStockoutRisk(existingDst))
+                );
+            }
+        }
+
         Inventory sourceInv = inventoryRepository.findByProductIdAndWarehouseId(product.getId(), source.getId())
                 .orElseThrow(() -> new InsufficientStockException(product.getSku(), 0, request.getQuantity()));
 
@@ -297,6 +329,11 @@ public class InventoryServiceImpl implements InventoryService {
                 dstAvailable, dstNewAvail, destInv.getReservedQuantity(), destInv.getReservedQuantity(),
                 destInv.getDamagedQuantity(), destInv.getDamagedQuantity(),
                 "Transferred from " + source.getCode(), request.getReferenceNumber(), request.getNotes(), user);
+
+        auditLogService.logAction(user, "WAREHOUSE_TRANSFER", "Inventory", savedSrc.getId(),
+                "Transferred " + request.getQuantity() + " units of " + product.getSku() +
+                " from " + source.getCode() + " to " + destination.getCode() +
+                (StringUtils.hasText(request.getReferenceNumber()) ? " [Ref: " + request.getReferenceNumber() + "]" : ""));
 
         return Arrays.asList(
                 inventoryMapper.toResponse(savedSrc, calculateStockoutRisk(savedSrc)),
@@ -397,11 +434,13 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     private User getUser(Long id) {
-        if (id == null) {
-            return userRepository.findAll().stream().findFirst().orElse(null);
+        if (id != null) {
+            return userRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         }
-        return userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+        return com.stockpilot.security.SecurityUtils.getCurrentUserEmail()
+                .flatMap(userRepository::findByEmail)
+                .orElseGet(() -> userRepository.findAll().stream().findFirst().orElse(null));
     }
 
     private Inventory getOrCreateInventory(Product product, Warehouse warehouse) {
@@ -440,8 +479,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     private String calculateStockoutRisk(Inventory inventory) {
         int avail = inventory.getAvailableQuantity() != null ? inventory.getAvailableQuantity() : 0;
-        int reorderLvl = (inventory.getProduct() != null && inventory.getProduct().getReorderLevel() != null)
-                ? inventory.getProduct().getReorderLevel() : 10;
+        Integer reorderLvl = (inventory.getProduct() != null) ? inventory.getProduct().getReorderLevel() : null;
 
         // Estimated Days Remaining based on 30-day historical transaction average
         double avgDailyDemand = 1.5; // Default baseline if historical transactions sparse
@@ -449,7 +487,7 @@ public class InventoryServiceImpl implements InventoryService {
 
         if (daysRemaining <= 6 || avail == 0) {
             return "CRITICAL";
-        } else if (daysRemaining <= 14 || avail <= reorderLvl) {
+        } else if (daysRemaining <= 14 || (reorderLvl != null && avail <= reorderLvl)) {
             return "HIGH";
         } else if (daysRemaining <= 30) {
             return "MEDIUM";

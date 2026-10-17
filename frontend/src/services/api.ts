@@ -19,10 +19,11 @@ import {
   AIChatResponse,
   DashboardSummary,
   SystemConfigResponse,
+  AuditLog,
 } from '../types';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -195,6 +196,21 @@ export const aiApi = {
 // System Settings Service
 export const settingsApi = {
   getConfig: () => api.get<ApiResponse<SystemConfigResponse>>('/settings/config').then((res) => res.data.data),
+};
+
+// Audit Logs Service
+export const auditLogApi = {
+  getPaged: (params?: { action?: string; entityType?: string; page?: number; size?: number }) =>
+    api.get<ApiResponse<PagedResponse<AuditLog>>>('/audit-logs', { params }).then((res) => res.data.data),
+};
+
+// User Administration Service
+export const userApi = {
+  getAll: () => api.get<ApiResponse<User[]>>('/users').then((res) => res.data.data),
+  updateRole: (id: number, role: string) =>
+    api.put<ApiResponse<User>>(`/users/${id}/role`, { role }).then((res) => res.data.data),
+  updateStatus: (id: number, enabled: boolean) =>
+    api.put<ApiResponse<User>>(`/users/${id}/status`, { enabled }).then((res) => res.data.data),
 };
 
 export default api;

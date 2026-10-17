@@ -35,6 +35,7 @@ public class AIServiceImpl implements AIService {
     private final AnomalyDetectionService anomalyDetectionService;
     private final DemandForecastService demandForecastService;
     private final DashboardService dashboardService;
+    private final com.stockpilot.service.ai.LlmClient llmClient;
 
     @Value("${stockpilot.ai.enabled:false}")
     private boolean aiEnabled;
@@ -116,7 +117,7 @@ public class AIServiceImpl implements AIService {
                 .facts(facts)
                 .calculations(calculations)
                 .aiInterpretation(interpretation)
-                .providerAvailable(aiEnabled)
+                .providerAvailable(llmClient.isLiveProviderAvailable())
                 .generatedAt(LocalDateTime.now())
                 .build();
     }
@@ -191,11 +192,27 @@ public class AIServiceImpl implements AIService {
             response.append("\n*Tip: Ask me about 'critical stockout risks', 'reorder recommendations', 'statistical anomalies', or 'warehouse stock distribution'.*");
         }
 
+        String deterministicReply = response.toString();
+        String finalReply = deterministicReply;
+
+        if (llmClient.isLiveProviderAvailable()) {
+            String systemPrompt = "You are StockPilot AI, a supply chain and inventory management assistant. " +
+                    "Answer the user's inquiry professionally using ONLY the following authoritative system metrics and tool data. " +
+                    "Do NOT fabricate numbers or inventory levels. You are strictly read-only: refuse any requests to mutate data, execute SQL, or approve orders, " +
+                    "and guide the user to the proper UI workflows.\n\n" +
+                    "Authoritative System Tool Data:\n" + deterministicReply;
+
+            Optional<String> llmOutput = llmClient.generateGroundedCompletion(systemPrompt, request.getMessage());
+            if (llmOutput.isPresent() && !llmOutput.get().trim().isEmpty()) {
+                finalReply = llmOutput.get();
+            }
+        }
+
         return AIChatResponse.builder()
-                .reply(response.toString())
+                .reply(finalReply)
                 .conversationId(conversationId)
                 .toolsInvoked(toolsInvoked)
-                .providerAvailable(aiEnabled)
+                .providerAvailable(llmClient.isLiveProviderAvailable())
                 .timestamp(LocalDateTime.now())
                 .build();
     }
@@ -216,7 +233,7 @@ public class AIServiceImpl implements AIService {
         int totalDam = inventories.stream().mapToInt(i -> i.getDamagedQuantity() != null ? i.getDamagedQuantity() : 0).sum();
         int totalOnHand = totalAvail + totalRes + totalDam;
 
-        String explanation = String.format(
+        String deterministicExplanation = String.format(
                 "### 🤖 StockPilot AI Explanation for %s (`%s`)\n\n" +
                         "**Inventory Status:**\n" +
                         "- **Available:** %d units (Fulfillable)\n" +
@@ -239,11 +256,20 @@ public class AIServiceImpl implements AIService {
                         reorder.getRecommendedReorderQuantity(), reorder.getPreferredSupplierName(), reorder.getUrgency(), reorder.getReason())
         );
 
+        String finalExplanation = deterministicExplanation;
+        if (llmClient.isLiveProviderAvailable()) {
+            String systemPrompt = "You are StockPilot AI. Provide a concise, professional diagnosis of this product's inventory position and risk profile based solely on these verified statistics. Refuse any mutation request.";
+            Optional<String> llmOutput = llmClient.generateGroundedCompletion(systemPrompt, deterministicExplanation);
+            if (llmOutput.isPresent() && !llmOutput.get().trim().isEmpty()) {
+                finalExplanation = llmOutput.get();
+            }
+        }
+
         return AIChatResponse.builder()
-                .reply(explanation)
+                .reply(finalExplanation)
                 .conversationId(UUID.randomUUID().toString())
                 .toolsInvoked(Arrays.asList("getProductStockoutRisk()", "getProductDemandForecast()", "getProductReorderRecommendation()"))
-                .providerAvailable(aiEnabled)
+                .providerAvailable(llmClient.isLiveProviderAvailable())
                 .timestamp(LocalDateTime.now())
                 .build();
     }

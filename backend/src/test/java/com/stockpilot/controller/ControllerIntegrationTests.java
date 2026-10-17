@@ -208,9 +208,9 @@ public class ControllerIntegrationTests {
     }
 
     @Test
-    @DisplayName("Unauthenticated request to protected endpoint is rejected with 403 Forbidden")
+    @DisplayName("Unauthenticated request to protected endpoint is rejected with 401 Unauthorized")
     void testUnauthenticatedAccessRejected() throws Exception {
         mockMvc.perform(get("/api/products"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 }

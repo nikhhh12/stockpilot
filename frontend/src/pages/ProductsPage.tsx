@@ -730,8 +730,8 @@ export const ProductsPage: React.FC = () => {
                 {productInventories?.map((inv) => (
                   <div key={inv.id} className="flex items-center justify-between p-2.5 bg-slate-900/60 rounded-lg border border-slate-800/50">
                     <div>
-                      <span className="font-semibold text-white">{inv.warehouse.name}</span>
-                      <span className="text-slate-400 text-[11px] ml-2 font-mono">({inv.warehouse.code})</span>
+                      <span className="font-semibold text-white">{inv.warehouseName ?? inv.warehouse?.name ?? 'Unknown Warehouse'}</span>
+                      <span className="text-slate-400 text-[11px] ml-2 font-mono">({inv.warehouseCode ?? inv.warehouse?.code ?? 'N/A'})</span>
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-sky-400">Avail: <strong>{inv.availableQuantity}</strong></span>

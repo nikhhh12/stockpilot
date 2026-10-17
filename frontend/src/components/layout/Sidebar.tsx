@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Bot,
   Settings,
+  ShieldCheck,
   LogOut,
   Sparkles,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ export const Sidebar: React.FC = () => {
     { to: '/suppliers', label: 'Suppliers', icon: Truck },
     { to: '/warehouses', label: 'Warehouses', icon: WarehouseIcon },
     { to: '/settings', label: 'Settings', icon: Settings },
+    { to: '/audit-logs', label: 'Audit Logs', icon: ShieldCheck },
   ];
 
   return (

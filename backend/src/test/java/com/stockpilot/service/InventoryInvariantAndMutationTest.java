@@ -45,6 +45,9 @@ public class InventoryInvariantAndMutationTest {
     @Autowired
     private ReservationRepository reservationRepository;
 
+    @Autowired
+    private AuditLogRepository auditLogRepository;
+
     private Product testProduct;
     private Warehouse warehouseA;
     private Warehouse warehouseB;
@@ -286,5 +289,88 @@ public class InventoryInvariantAndMutationTest {
                     .quantity(5)
                     .build(), 1L);
         });
+    }
+
+    @Test
+    @DisplayName("Duplicate transfer with identical referenceNumber is idempotent and does not mutate stock twice")
+    void testIdempotentTransferDoesNotDuplicateStockMovement() {
+        inventoryService.stockIn(StockInRequest.builder()
+                .productId(testProduct.getId())
+                .warehouseId(warehouseA.getId())
+                .quantity(40)
+                .build(), 1L);
+
+        StockTransferRequest transferReq = StockTransferRequest.builder()
+                .productId(testProduct.getId())
+                .sourceWarehouseId(warehouseA.getId())
+                .destinationWarehouseId(warehouseB.getId())
+                .quantity(15)
+                .referenceNumber("IDEMPOTENT-TR-999")
+                .build();
+
+        List<InventoryResponse> firstCall = inventoryService.transferStock(transferReq, 1L);
+        assertEquals(25, firstCall.get(0).getAvailableQuantity());
+        assertEquals(15, firstCall.get(1).getAvailableQuantity());
+
+        // Second call with same referenceNumber must return existing balances without double-deduction
+        List<InventoryResponse> secondCall = inventoryService.transferStock(transferReq, 1L);
+        assertEquals(25, secondCall.get(0).getAvailableQuantity());
+        assertEquals(15, secondCall.get(1).getAvailableQuantity());
+
+        Inventory invA = inventoryRepository.findByProductIdAndWarehouseId(testProduct.getId(), warehouseA.getId()).orElseThrow();
+        assertEquals(25, invA.getAvailableQuantity());
+    }
+
+    @Test
+    @DisplayName("Conflicting reuse of transfer referenceNumber with different parameters is rejected")
+    void testConflictingTransferReferenceRejection() {
+        inventoryService.stockIn(StockInRequest.builder()
+                .productId(testProduct.getId())
+                .warehouseId(warehouseA.getId())
+                .quantity(40)
+                .build(), 1L);
+
+        StockTransferRequest initialReq = StockTransferRequest.builder()
+                .productId(testProduct.getId())
+                .sourceWarehouseId(warehouseA.getId())
+                .destinationWarehouseId(warehouseB.getId())
+                .quantity(10)
+                .referenceNumber("TR-CONFLICT-001")
+                .build();
+        inventoryService.transferStock(initialReq, 1L);
+
+        // Attempt to reuse same referenceNumber with different quantity (20 instead of 10)
+        StockTransferRequest conflictingReq = StockTransferRequest.builder()
+                .productId(testProduct.getId())
+                .sourceWarehouseId(warehouseA.getId())
+                .destinationWarehouseId(warehouseB.getId())
+                .quantity(20)
+                .referenceNumber("TR-CONFLICT-001")
+                .build();
+
+        assertThrows(InvalidOperationException.class, () -> {
+            inventoryService.transferStock(conflictingReq, 1L);
+        });
+    }
+
+    @Test
+    @DisplayName("Inventory adjustment writes an immutable AuditLog record")
+    void testAdjustmentWritesAuditLog() {
+        inventoryService.stockIn(StockInRequest.builder()
+                .productId(testProduct.getId())
+                .warehouseId(warehouseA.getId())
+                .quantity(20)
+                .build(), 1L);
+
+        inventoryService.adjustStock(StockAdjustmentRequest.builder()
+                .productId(testProduct.getId())
+                .warehouseId(warehouseA.getId())
+                .resultingQuantity(35)
+                .reason("Annual physical inventory audit")
+                .build(), 1L);
+
+        List<AuditLog> logs = auditLogRepository.findAll();
+        boolean hasAdjustmentLog = logs.stream().anyMatch(l -> "INVENTORY_ADJUSTMENT".equals(l.getAction()));
+        assertTrue(hasAdjustmentLog, "Audit log for INVENTORY_ADJUSTMENT must be persisted");
     }
 }

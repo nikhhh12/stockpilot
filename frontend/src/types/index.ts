@@ -90,13 +90,23 @@ export interface Product {
 
 export interface Inventory {
   id: number;
-  product: Product;
-  warehouse: Warehouse;
+  productId?: number;
+  productSku?: string;
+  productName?: string;
+  productUnit?: string;
+  reorderLevel?: number | null;
+  warehouseId?: number;
+  warehouseName?: string;
+  warehouseCode?: string;
   availableQuantity: number;
   reservedQuantity: number;
   damagedQuantity: number;
   onHandQuantity: number;
+  stockStatus?: 'HEALTHY' | 'LOW_STOCK' | 'OUT_OF_STOCK';
+  stockoutRisk?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   calculatedStockoutRisk?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  product?: Product;
+  warehouse?: Warehouse;
   version: number;
   updatedAt: string;
 }
@@ -321,4 +331,16 @@ export interface SystemConfigResponse {
     aiModel: string;
     aiAvailable: boolean;
   };
+}
+
+export interface AuditLog {
+  id: number;
+  userId?: number;
+  userName?: string;
+  userEmail?: string;
+  action: string;
+  entityType?: string;
+  entityId?: number;
+  description?: string;
+  createdAt: string;
 }

@@ -27,8 +27,11 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
     private final PurchaseOrderRepository purchaseOrderRepository;
@@ -40,6 +43,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     private final InventoryRepository inventoryRepository;
     private final StockTransactionRepository stockTransactionRepository;
     private final PurchaseOrderMapper purchaseOrderMapper;
+    private final com.stockpilot.service.AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -152,6 +156,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
         po.setStatus(PurchaseOrderStatusEnum.APPROVED);
         PurchaseOrder saved = purchaseOrderRepository.save(po);
+        User actor = getUser(userId);
+        auditLogService.logAction(actor, "APPROVE_PO", "PurchaseOrder", saved.getId(), "Approved purchase order " + saved.getPoNumber());
         return purchaseOrderMapper.toResponse(saved);
     }
 
@@ -167,6 +173,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
         po.setStatus(PurchaseOrderStatusEnum.ORDERED);
         PurchaseOrder saved = purchaseOrderRepository.save(po);
+        User actor = getUser(userId);
+        auditLogService.logAction(actor, "ORDER_PO", "PurchaseOrder", saved.getId(), "Placed purchase order " + saved.getPoNumber());
         return purchaseOrderMapper.toResponse(saved);
     }
 
@@ -180,6 +188,21 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 po.getStatus() != PurchaseOrderStatusEnum.ORDERED &&
                 po.getStatus() != PurchaseOrderStatusEnum.PARTIALLY_RECEIVED) {
             throw new InvalidOperationException("Cannot receive items for PO in status: " + po.getStatus());
+        }
+
+        // Idempotency check: if client provided a receipt reference that was already processed
+        if (StringUtils.hasText(request.getReceiptReference())) {
+            var existingTxOpt = stockTransactionRepository.findFirstByReferenceNumberAndTransactionType(
+                    request.getReceiptReference(), TransactionTypeEnum.STOCK_IN);
+            if (existingTxOpt.isPresent()) {
+                StockTransaction prevTx = existingTxOpt.get();
+                if (prevTx.getNotes() != null && !prevTx.getNotes().contains(po.getPoNumber())) {
+                    throw new InvalidOperationException("Idempotency conflict: Receipt reference '" +
+                            request.getReceiptReference() + "' has already been used for another purchase order");
+                }
+                log.info("Duplicate PO receipt request with reference '{}' detected. Returning current PO state.", request.getReceiptReference());
+                return purchaseOrderMapper.toResponse(po);
+            }
         }
 
         User user = getUser(userId);
@@ -239,7 +262,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                     .previousDamagedQuantity(inventory.getDamagedQuantity())
                     .newDamagedQuantity(inventory.getDamagedQuantity())
                     .reason("Purchase Order Delivery Receipt")
-                    .referenceNumber(po.getPoNumber())
+                    .referenceNumber(StringUtils.hasText(request.getReceiptReference()) ? request.getReceiptReference() : po.getPoNumber())
                     .notes("Received line item from PO " + po.getPoNumber())
                     .performedBy(user)
                     .build();
@@ -258,6 +281,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         }
 
         PurchaseOrder saved = purchaseOrderRepository.save(po);
+        auditLogService.logAction(user, "RECEIVE_PO", "PurchaseOrder", saved.getId(),
+                "Received items for purchase order " + saved.getPoNumber() +
+                (StringUtils.hasText(request.getReceiptReference()) ? " [Ref: " + request.getReceiptReference() + "]" : ""));
         return purchaseOrderMapper.toResponse(saved);
     }
 
@@ -273,14 +299,18 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
         po.setStatus(PurchaseOrderStatusEnum.CANCELLED);
         PurchaseOrder saved = purchaseOrderRepository.save(po);
+        User actor = getUser(userId);
+        auditLogService.logAction(actor, "CANCEL_PO", "PurchaseOrder", saved.getId(), "Cancelled purchase order " + saved.getPoNumber());
         return purchaseOrderMapper.toResponse(saved);
     }
 
     private User getUser(Long id) {
-        if (id == null) {
-            return userRepository.findAll().stream().findFirst().orElse(null);
+        if (id != null) {
+            return userRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         }
-        return userRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+        return com.stockpilot.security.SecurityUtils.getCurrentUserEmail()
+                .flatMap(userRepository::findByEmail)
+                .orElseGet(() -> userRepository.findAll().stream().findFirst().orElse(null));
     }
 }

@@ -18,4 +18,6 @@ public class PurchaseOrderReceiveRequest {
     @NotEmpty(message = "At least one received item is required")
     @Valid
     private List<PurchaseOrderItemReceiveDto> items;
+
+    private String receiptReference;
 }

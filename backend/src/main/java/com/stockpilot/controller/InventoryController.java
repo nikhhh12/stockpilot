@@ -82,6 +82,7 @@ public class InventoryController {
     }
 
     @PostMapping("/adjust")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'INVENTORY_MANAGER')")
     public ResponseEntity<ApiResponse<InventoryResponse>> adjustStock(@Valid @RequestBody StockAdjustmentRequest request) {
         InventoryResponse response = inventoryService.adjustStock(request, null);
         return ResponseEntity.ok(ApiResponse.success(response, "Stock adjustment completed successfully"));

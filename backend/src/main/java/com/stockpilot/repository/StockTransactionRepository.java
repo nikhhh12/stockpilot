@@ -26,4 +26,6 @@ public interface StockTransactionRepository extends JpaRepository<StockTransacti
             @Param("types") List<TransactionTypeEnum> types,
             @Param("startDate") LocalDateTime startDate
     );
+    boolean existsByReferenceNumberAndTransactionType(String referenceNumber, TransactionTypeEnum transactionType);
+    java.util.Optional<StockTransaction> findFirstByReferenceNumberAndTransactionType(String referenceNumber, TransactionTypeEnum transactionType);
 }

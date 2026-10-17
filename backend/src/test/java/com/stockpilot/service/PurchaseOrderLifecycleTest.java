@@ -45,6 +45,9 @@ public class PurchaseOrderLifecycleTest {
     @Autowired
     private InventoryRepository inventoryRepository;
 
+    @Autowired
+    private AuditLogRepository auditLogRepository;
+
     private Product product;
     private Supplier supplier;
     private Warehouse warehouse;
@@ -189,5 +192,133 @@ public class PurchaseOrderLifecycleTest {
         PurchaseOrderResponse created = purchaseOrderService.createPurchaseOrder(createReq, 1L);
         PurchaseOrderResponse cancelled = purchaseOrderService.cancelPurchaseOrder(created.getId(), 1L);
         assertEquals(PurchaseOrderStatusEnum.CANCELLED, cancelled.getStatus());
+    }
+
+    @Test
+    @DisplayName("Idempotent receiving with receiptReference does not double-receive units")
+    void testIdempotentReceiveDoesNotDoubleReceive() {
+        PurchaseOrderCreateRequest createReq = PurchaseOrderCreateRequest.builder()
+                .supplierId(supplier.getId())
+                .warehouseId(warehouse.getId())
+                .expectedDeliveryDate(LocalDate.now().plusDays(5))
+                .items(List.of(
+                        PurchaseOrderItemRequest.builder()
+                                .productId(product.getId())
+                                .orderedQuantity(20)
+                                .unitCost(BigDecimal.valueOf(100))
+                                .build()
+                ))
+                .build();
+
+        PurchaseOrderResponse created = purchaseOrderService.createPurchaseOrder(createReq, 1L);
+        purchaseOrderService.approvePurchaseOrder(created.getId(), 1L);
+        purchaseOrderService.orderPurchaseOrder(created.getId(), 1L);
+
+        Long itemId = created.getItems().get(0).getId();
+
+        PurchaseOrderReceiveRequest receiveReq = PurchaseOrderReceiveRequest.builder()
+                .receiptReference("RCV-REF-12345")
+                .items(List.of(
+                        PurchaseOrderItemReceiveDto.builder()
+                                .itemId(itemId)
+                                .receivedQuantityDelta(10)
+                                .build()
+                ))
+                .build();
+
+        PurchaseOrderResponse firstReceive = purchaseOrderService.receivePurchaseOrder(created.getId(), receiveReq, 1L);
+        assertEquals(10, firstReceive.getItems().get(0).getReceivedQuantity());
+
+        // Re-sending same request with same receiptReference
+        PurchaseOrderResponse secondReceive = purchaseOrderService.receivePurchaseOrder(created.getId(), receiveReq, 1L);
+        assertEquals(10, secondReceive.getItems().get(0).getReceivedQuantity());
+    }
+
+    @Test
+    @DisplayName("Conflicting reuse of receiptReference on a different purchase order is rejected")
+    void testConflictingReceiptReferenceRejection() {
+        PurchaseOrderCreateRequest createReq1 = PurchaseOrderCreateRequest.builder()
+                .supplierId(supplier.getId())
+                .warehouseId(warehouse.getId())
+                .expectedDeliveryDate(LocalDate.now().plusDays(5))
+                .items(List.of(
+                        PurchaseOrderItemRequest.builder()
+                                .productId(product.getId())
+                                .orderedQuantity(20)
+                                .unitCost(BigDecimal.valueOf(100))
+                                .build()
+                ))
+                .build();
+        PurchaseOrderResponse po1 = purchaseOrderService.createPurchaseOrder(createReq1, 1L);
+        purchaseOrderService.approvePurchaseOrder(po1.getId(), 1L);
+        purchaseOrderService.orderPurchaseOrder(po1.getId(), 1L);
+
+        // Receive PO 1 with specific receipt reference
+        purchaseOrderService.receivePurchaseOrder(po1.getId(), PurchaseOrderReceiveRequest.builder()
+                .receiptReference("RCV-UNIQUE-999")
+                .items(List.of(
+                        PurchaseOrderItemReceiveDto.builder()
+                                .itemId(po1.getItems().get(0).getId())
+                                .receivedQuantityDelta(5)
+                                .build()
+                ))
+                .build(), 1L);
+
+        // Create a distinct PO 2
+        PurchaseOrderCreateRequest createReq2 = PurchaseOrderCreateRequest.builder()
+                .supplierId(supplier.getId())
+                .warehouseId(warehouse.getId())
+                .expectedDeliveryDate(LocalDate.now().plusDays(5))
+                .items(List.of(
+                        PurchaseOrderItemRequest.builder()
+                                .productId(product.getId())
+                                .orderedQuantity(15)
+                                .unitCost(BigDecimal.valueOf(100))
+                                .build()
+                ))
+                .build();
+        PurchaseOrderResponse po2 = purchaseOrderService.createPurchaseOrder(createReq2, 1L);
+        purchaseOrderService.approvePurchaseOrder(po2.getId(), 1L);
+        purchaseOrderService.orderPurchaseOrder(po2.getId(), 1L);
+
+        // Attempting to reuse same receiptReference for PO 2 must fail with conflict exception
+        assertThrows(InvalidOperationException.class, () -> {
+            purchaseOrderService.receivePurchaseOrder(po2.getId(), PurchaseOrderReceiveRequest.builder()
+                    .receiptReference("RCV-UNIQUE-999")
+                    .items(List.of(
+                            PurchaseOrderItemReceiveDto.builder()
+                                    .itemId(po2.getItems().get(0).getId())
+                                    .receivedQuantityDelta(5)
+                                    .build()
+                    ))
+                    .build(), 1L);
+        });
+    }
+
+    @Test
+    @DisplayName("PO lifecycle transitions write immutable AuditLog records")
+    void testPurchaseOrderWritesAuditLogs() {
+        PurchaseOrderCreateRequest createReq = PurchaseOrderCreateRequest.builder()
+                .supplierId(supplier.getId())
+                .warehouseId(warehouse.getId())
+                .expectedDeliveryDate(LocalDate.now().plusDays(5))
+                .items(List.of(
+                        PurchaseOrderItemRequest.builder()
+                                .productId(product.getId())
+                                .orderedQuantity(10)
+                                .unitCost(BigDecimal.valueOf(100))
+                                .build()
+                ))
+                .build();
+        PurchaseOrderResponse po = purchaseOrderService.createPurchaseOrder(createReq, 1L);
+        purchaseOrderService.approvePurchaseOrder(po.getId(), 1L);
+        purchaseOrderService.orderPurchaseOrder(po.getId(), 1L);
+
+        List<AuditLog> logs = auditLogRepository.findAll();
+        boolean hasApproveLog = logs.stream().anyMatch(l -> "APPROVE_PO".equals(l.getAction()) && po.getId().equals(l.getEntityId()));
+        boolean hasOrderLog = logs.stream().anyMatch(l -> "ORDER_PO".equals(l.getAction()) && po.getId().equals(l.getEntityId()));
+
+        assertTrue(hasApproveLog, "Audit log for APPROVE_PO must be recorded");
+        assertTrue(hasOrderLog, "Audit log for ORDER_PO must be recorded");
     }
 }
