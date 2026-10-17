@@ -6,10 +6,10 @@ services:
     container_name: stockpilot-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in your .env file}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-stockpilot}
       MYSQL_USER: ${MYSQL_USER:-stockuser}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-stockpassword}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in your .env file}
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -35,7 +35,7 @@ services:
       SPRING_PROFILES_ACTIVE: prod
       DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-stockpilot}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       DB_USERNAME: ${MYSQL_USER:-stockuser}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-stockpassword}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in your .env file}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your .env file}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:80,http://localhost}
       SHOW_SQL: ${SHOW_SQL:-false}
